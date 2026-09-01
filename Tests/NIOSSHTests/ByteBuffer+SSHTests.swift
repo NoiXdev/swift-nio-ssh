@@ -361,6 +361,44 @@ final class ByteBufferSSHTests: XCTestCase {
 
         XCTAssertNoThrow(XCTAssertNotNil(try buffer.readSSHHostKey()))
     }
+
+    // Ported from apple/swift-nio-ssh db57f32 (0.7.1). A zero-capacity
+    // buffer used to trap: `moveWriterIndex(forwardBy:)` asserts the bytes
+    // are already writable, `writeInteger` reserves them first.
+    func testCompositeStringDoesTheRightThingWithBB() throws {
+        var buffer = ByteBuffer()
+        XCTAssertEqual(buffer.capacity, 0)
+
+        buffer.writeCompositeSSHString {
+            $0.writeInteger(UInt64(9))
+        }
+        let writtenBytes = buffer.readBytes(length: buffer.readableBytes)
+        XCTAssertEqual(
+            writtenBytes,
+            [0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 9]
+        )
+    }
+
+    // Upstream exercises `writeSSHPacket` directly; this fork frames packets
+    // inside `SSHPacketSerializer.serialize`, so the same zero-capacity case
+    // is driven through the serializer: a version first (unframed, moves it
+    // to cleartext), then a framed message into an EMPTY buffer.
+    func testSerializerFramesIntoAnEmptyBuffer() throws {
+        var serializer = SSHPacketSerializer()
+        var versionBuffer = ByteBuffer()
+        try serializer.serialize(message: .version("Tests_v1.0"), to: &versionBuffer)
+
+        var buffer = ByteBuffer()
+        XCTAssertEqual(buffer.capacity, 0)
+        try serializer.serialize(message: .newKeys, to: &buffer)
+
+        let packetLength: UInt32 = try XCTUnwrap(buffer.getInteger(at: 0))
+        let paddingLength: UInt8 = try XCTUnwrap(buffer.getInteger(at: 4))
+        XCTAssertEqual(buffer.readableBytes, 4 + Int(packetLength))
+        XCTAssertGreaterThanOrEqual(paddingLength, 4)
+        XCTAssertEqual((4 + Int(packetLength)) % 8, 0)
+    }
+
 }
 
 private extension ByteBuffer {

@@ -61,7 +61,7 @@ struct SSHPacketSerializer {
             ///   byte[m]   mac (Message Authentication Code - MAC); m = mac_length
 
             /// payload
-            buffer.moveWriterIndex(forwardBy: 5)
+            buffer.writeMultipleIntegers(UInt32(0), UInt8(0))
             let messageLength = buffer.writeSSHMessage(message)
 
             /// RFC 4253 § 6:
