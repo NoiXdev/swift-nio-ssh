@@ -36,7 +36,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testReadVersion() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
 
         var part1 = ByteBuffer.of(string: "SSH-2.0-")
         parser.append(bytes: &part1)
@@ -55,7 +55,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testReadVersionWithExtraLines() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
 
         var part1 = ByteBuffer.of(string: "xxxx\r\nyyyy\r\nSSH-2.0-")
         parser.append(bytes: &part1)
@@ -67,14 +67,38 @@ final class SSHPacketParserTests: XCTestCase {
 
         switch try parser.nextPacket() {
         case .version(let string):
-            XCTAssertEqual(string, "xxxx\r\nyyyy\r\nSSH-2.0-OpenSSH_7.9")
+            XCTAssertEqual(string, "SSH-2.0-OpenSSH_7.9")
         default:
             XCTFail("Expecting .version")
         }
     }
 
+    /// RFC 4253 §4.2: a server MAY send lines before its identification
+    /// string, and only the line starting with "SSH-" is the version. The
+    /// version string is V_S in the key-exchange hash, so returning the
+    /// preamble with it does not merely produce an odd string — the client
+    /// computes a different exchange hash than the server signed, and the
+    /// connection fails with `invalidExchangeHashSignature`. Measured
+    /// against OpenSSH 10.3 behind a proxy that prepends one such line.
+    func testPreambleLinesAreNotPartOfTheVersion() throws {
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
+
+        var bytes = ByteBuffer.of(string: "Welcome to my server\r\nSSH-2.0-OpenSSH_9.6\r\n")
+        parser.append(bytes: &bytes)
+
+        switch try parser.nextPacket() {
+        case .version(let string):
+            XCTAssertEqual(string, "SSH-2.0-OpenSSH_9.6")
+        default:
+            XCTFail("Expecting .version")
+        }
+        // Everything up to and including the version line is consumed; the
+        // preamble must not linger in front of the first binary packet.
+        XCTAssertNil(try parser.nextPacket())
+    }
+
     func testReadVersionWithoutCarriageReturn() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
 
         var part1 = ByteBuffer.of(string: "SSH-2.0-")
         parser.append(bytes: &part1)
@@ -93,7 +117,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testReadVersionWithExtraLinesWithoutCarriageReturn() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
 
         var part1 = ByteBuffer.of(string: "xxxx\nyyyy\nSSH-2.0-")
         parser.append(bytes: &part1)
@@ -105,14 +129,14 @@ final class SSHPacketParserTests: XCTestCase {
 
         switch try parser.nextPacket() {
         case .version(let string):
-            XCTAssertEqual(string, "xxxx\nyyyy\nSSH-2.0-OpenSSH_7.4")
+            XCTAssertEqual(string, "SSH-2.0-OpenSSH_7.4")
         default:
             XCTFail("Expecting .version")
         }
     }
 
     func testBinaryInParts() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
         self.feedVersion(to: &parser)
 
         var part1 = ByteBuffer.of(bytes: [0, 0, 0])
@@ -140,7 +164,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testBinaryFull() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
         self.feedVersion(to: &parser)
 
         var part1 = ByteBuffer.of(bytes: [0, 0, 0, 28, 10, 5, 0, 0, 0, 12, 115, 115, 104, 45, 117, 115, 101, 114, 97, 117, 116, 104, 42, 111, 216, 12, 226, 248, 144, 175, 157, 207])
@@ -155,7 +179,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testBinaryTwoMessages() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
         self.feedVersion(to: &parser)
 
         var part = ByteBuffer.of(bytes: [0, 0, 0, 28, 10, 5, 0, 0, 0, 12, 115, 115, 104, 45, 117, 115, 101, 114, 97, 117, 116, 104, 42, 111, 216, 12, 226, 248, 144, 175, 157, 207, 0, 0, 0, 28, 10, 5, 0, 0, 0, 12, 115, 115, 104, 45, 117, 115, 101, 114, 97, 117, 116, 104, 42, 111, 216, 12, 226, 248, 144, 175, 157, 207])
@@ -176,7 +200,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testWeReclaimStorage() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator())
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator())
         self.feedVersion(to: &parser)
         XCTAssertNoThrow(try parser.nextPacket())
 
@@ -201,7 +225,7 @@ final class SSHPacketParserTests: XCTestCase {
     }
 
     func testMaximumPacketSizeInVersion() throws {
-        var parser = SSHPacketParser(allocator: ByteBufferAllocator(), maximumPacketSize: 1 << 15)
+        var parser = SSHPacketParser(isServer: false, allocator: ByteBufferAllocator(), maximumPacketSize: 1 << 15)
         let longVersionString = String(repeating: "z", count: SSHPacketParser.maximumAllowedVersionSize + 256)
         var version = ByteBuffer.of(string: longVersionString + "\r\n")
         parser.append(bytes: &version)

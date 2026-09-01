@@ -34,7 +34,16 @@ struct SSHPacketParser {
         self.buffer.readerIndex
     }
 
-    init(allocator: ByteBufferAllocator, maximumPacketSize: Int = defaultMaximumPacketSize) {
+    /// Whether this parser reads for a server. RFC 4253 §4.2 lets only the
+    /// SERVER send lines before its identification string, so a client-side
+    /// parser skips such lines and a server-side parser treats the first line
+    /// as the version — and lets `validateBanner` reject a client that sent
+    /// anything else. No default on purpose: a forgotten argument must not
+    /// quietly make a server tolerant.
+    private let isServer: Bool
+
+    init(isServer: Bool, allocator: ByteBufferAllocator, maximumPacketSize: Int = defaultMaximumPacketSize) {
+        self.isServer = isServer
         // Assert that users don't provide a packet size lower than allowed by spec
         precondition(maximumPacketSize >= 32768, "Maximum Packet Size is below minimum requirement as specified by RFC 4254")
         precondition(maximumPacketSize <= (1 << 24), "Maximum Packet Size is set abnormally high")
@@ -149,11 +158,20 @@ struct SSHPacketParser {
                 let lineStartIndex = lastLineEndIndex?.advanced(by: 1) ?? slice.startIndex
                 let lineSlice = slice[lineStartIndex..<index]
                 
-                // Check if this line looks like an SSH version (any SSH version, not just 2.0)
-                if lineSlice.count >= 4 && lineSlice.starts(with: "SSH-".utf8) {
-                    // Found SSH version line, return everything up to and including this line
-                    var version = String(decoding: slice[slice.startIndex..<index], as: UTF8.self)
-                    // read including \n
+                // A client keeps skipping until it sees the line that looks like
+                // an SSH version (any SSH version, not just 2.0). A server takes
+                // the first line, whatever it is: a client is not allowed to send
+                // a preamble, and validation downstream rejects what is not "SSH-".
+                let isVersionLine = lineSlice.count >= 4 && lineSlice.starts(with: "SSH-".utf8)
+                if self.isServer || isVersionLine {
+                    // Found the SSH version line. Only THIS line is the version:
+                    // RFC 4253 §4.2 lets a server send other lines first, and
+                    // they are not part of V_S. The version string feeds the
+                    // key-exchange hash, so returning the preamble with it makes
+                    // the client hash something the server never signed.
+                    var version = String(decoding: lineSlice, as: UTF8.self)
+                    // Consume everything up to and including this line's \n,
+                    // preamble included, so nothing lingers before the first packet.
                     self.buffer.moveReaderIndex(forwardBy: slice.startIndex.distance(to: index).advanced(by: 1))
                     // Remove the trailing \r if present (but keep \n removal logic for consistency)
                     if version.last == "\r" {

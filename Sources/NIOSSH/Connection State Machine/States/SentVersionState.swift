@@ -34,7 +34,7 @@ extension SSHConnectionStateMachine {
             self.role = state.role
             self.serializer = state.serializer
 
-            self.parser = SSHPacketParser(allocator: allocator, maximumPacketSize: maximumPacketSize)
+            self.parser = SSHPacketParser(isServer: state.role.isServer, allocator: allocator, maximumPacketSize: maximumPacketSize)
             self.allocator = allocator
             self.connectionAttributes = state.connectionAttributes
         }
