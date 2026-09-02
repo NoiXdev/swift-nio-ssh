@@ -251,7 +251,12 @@ struct SSHKeyExchangeStateMachine {
         case .keyExchangeInitSent(exchange: var exchanger, negotiated: let negotiated):
             switch self.role {
             case .client:
-                guard message.hostKey.keyPrefix.elementsEqual(negotiated.negotiatedHostKeyAlgorithm.utf8) else {
+                // The key blob is typed with the key format identifier, which is not always the
+                // negotiated algorithm name (RFC 8332): a key negotiated as `rsa-sha2-512` arrives in
+                // an `ssh-rsa` blob. So we ask the key which algorithm names it answers to, rather
+                // than comparing the blob type directly. For every bundled key type that list is
+                // exactly the blob type, and this is the check it was before.
+                guard message.hostKey.hostKeyAlgorithms.contains(where: { $0.utf8.elementsEqual(negotiated.negotiatedHostKeyAlgorithm.utf8) }) else {
                     throw NIOSSHError.invalidHostKeyForKeyExchange(expected: negotiated.negotiatedHostKeyAlgorithm,
                                                                    got: message.hostKey.keyPrefix)
                 }
@@ -554,7 +559,12 @@ extension SSHKeyExchangeStateMachine {
 
     static var supportedServerHostKeyAlgorithms: [Substring] {
         let bundledAlgorithms = bundledServerHostKeyAlgorithms
-        let customAlgorithms = NIOSSHPublicKey.customPublicKeyAlgorithms.map { Substring($0.publicKeyPrefix) }
+        // A custom type is offered under its host key algorithm names, which default to its key blob
+        // prefix but need not equal it: RFC 8332 negotiates `rsa-sha2-512` for a key whose blob is
+        // still typed `ssh-rsa`.
+        let customAlgorithms = NIOSSHPublicKey.customPublicKeyAlgorithms.flatMap { type -> [Substring] in
+            type.hostKeyAlgorithmNames.map { name -> Substring in Substring(name) }
+        }
 
         return bundledAlgorithms + customAlgorithms
     }

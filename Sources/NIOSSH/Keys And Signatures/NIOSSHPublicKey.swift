@@ -199,12 +199,36 @@ extension NIOSSHPublicKey {
         }
     }
 
+    /// The host key algorithm names under which this key may be negotiated.
+    ///
+    /// For every bundled key type this is exactly `[keyPrefix]`: the algorithm name and the key blob
+    /// type are the same string. A custom type may declare `hostKeyAlgorithmNames` that differ from
+    /// its blob prefix -- RFC 8332 negotiates an RSA host key as `rsa-sha2-256` or `rsa-sha2-512`
+    /// while the blob stays typed `ssh-rsa` -- in which case the blob prefix is not among them.
+    var hostKeyAlgorithms: [String] {
+        switch self.backingKey {
+        case .custom(let publicKey):
+            return Swift.type(of: publicKey).hostKeyAlgorithmNames
+        case .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521, .certified:
+            return [String(decoding: self.keyPrefix, as: UTF8.self)]
+        }
+    }
+
     private static let bundledAlgorithms: [String.UTF8View] = [
         Self.ed25519PublicKeyPrefix, Self.ecdsaP384PublicKeyPrefix, Self.ecdsaP256PublicKeyPrefix, Self.ecdsaP521PublicKeyPrefix,
     ]
 
+    /// Every algorithm name that identifies a key type we can read.
+    ///
+    /// A custom type contributes its blob prefix -- that is the identifier its blob carries, and the
+    /// one `readPublicKeyWithoutPrefixForIdentifier` matches -- plus any separate host key algorithm
+    /// names it declares.
     static var knownAlgorithms: [String.UTF8View] {
-        bundledAlgorithms + customPublicKeyAlgorithms.map { $0.publicKeyPrefix.utf8 }
+        bundledAlgorithms + customPublicKeyAlgorithms.flatMap { type -> [String.UTF8View] in
+            let prefix = type.publicKeyPrefix
+            let names = type.hostKeyAlgorithmNames
+            return [prefix.utf8] + names.lazy.filter { $0 != prefix }.map { $0.utf8 }
+        }
     }
 
     static var customPublicKeyAlgorithms: [NIOSSHPublicKeyProtocol.Type] {

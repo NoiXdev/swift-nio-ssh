@@ -49,6 +49,19 @@ public protocol NIOSSHPublicKeyProtocol {
     /// The returned value MUST NOT overlap with other public key implementations or a specifications that the public key does not implement.
     static var publicKeyPrefix: String { get }
 
+    /// The host key algorithm names under which this key type is offered and negotiated during key exchange.
+    ///
+    /// RFC 8332 separates the algorithm name negotiated in key exchange from the key blob type that
+    /// identifies the key on the wire. An RSA host key negotiated as `rsa-sha2-256` or `rsa-sha2-512`
+    /// still arrives in a blob typed `ssh-rsa`, so for such a type the two identifiers differ and both
+    /// are needed: `publicKeyPrefix` reads and writes the blob, these names are what appears in
+    /// SSH_MSG_KEXINIT and in `NIOSSHError.invalidHostKeyForKeyExchange`.
+    ///
+    /// Implementing this is optional. The default is `[publicKeyPrefix]`, which is the correct answer
+    /// for every key type whose algorithm name and blob type coincide -- including all of the types
+    /// bundled with NIOSSH.
+    static var hostKeyAlgorithmNames: [String] { get }
+
     /// The raw reprentation of this publc key as a blob.
     var rawRepresentation: Data { get }
 
@@ -61,6 +74,12 @@ public protocol NIOSSHPublicKeyProtocol {
 
     /// Reads this Public Key from the buffer using the same format implemented in `write(to:)`
     static func read(from buffer: inout ByteBuffer) throws -> Self
+}
+
+public extension NIOSSHPublicKeyProtocol {
+    static var hostKeyAlgorithmNames: [String] {
+        [Self.publicKeyPrefix]
+    }
 }
 
 internal extension NIOSSHPublicKeyProtocol {
