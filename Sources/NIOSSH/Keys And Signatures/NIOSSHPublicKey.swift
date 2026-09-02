@@ -214,6 +214,26 @@ extension NIOSSHPublicKey {
         }
     }
 
+    /// The public key algorithm name this key offers in public key user authentication.
+    ///
+    /// For every bundled key type, and for a certified key, this is exactly `keyPrefix`: the algorithm
+    /// name and the key blob type are the same string. A custom type may declare a
+    /// `userAuthAlgorithmName` that differs from its blob prefix -- RFC 8332 §3 sends an RSA user key
+    /// under `pkalg = rsa-sha2-512` in a blob still typed `ssh-rsa` -- in which case this is not the
+    /// blob prefix.
+    ///
+    /// A certified key answers with its certificate algorithm name (`...-cert-v01@openssh.com`),
+    /// which is what `keyPrefix` already returns and what the certificate blob is typed with. There
+    /// is no RSA certificate type bundled here, so nothing certified needs the split today.
+    var userAuthAlgorithmName: String.UTF8View {
+        switch self.backingKey {
+        case .custom(let publicKey):
+            return Swift.type(of: publicKey).userAuthAlgorithmName.utf8
+        case .ed25519, .ecdsaP256, .ecdsaP384, .ecdsaP521, .certified:
+            return self.keyPrefix
+        }
+    }
+
     private static let bundledAlgorithms: [String.UTF8View] = [
         Self.ed25519PublicKeyPrefix, Self.ecdsaP384PublicKeyPrefix, Self.ecdsaP256PublicKeyPrefix, Self.ecdsaP521PublicKeyPrefix,
     ]
@@ -222,12 +242,18 @@ extension NIOSSHPublicKey {
     ///
     /// A custom type contributes its blob prefix -- that is the identifier its blob carries, and the
     /// one `readPublicKeyWithoutPrefixForIdentifier` matches -- plus any separate host key algorithm
-    /// names it declares.
+    /// names it declares, plus its user auth algorithm name if that differs too. Both readers of this
+    /// list are on the user auth path (`readUserAuthRequestMessage` and `readUserAuthPKOKMessage`), so
+    /// a type whose `pkalg` is not its blob prefix would otherwise be filed as unknown before its
+    /// blob was ever looked at.
     static var knownAlgorithms: [String.UTF8View] {
         bundledAlgorithms + customPublicKeyAlgorithms.flatMap { type -> [String.UTF8View] in
             let prefix = type.publicKeyPrefix
-            let names = type.hostKeyAlgorithmNames
-            return [prefix.utf8] + names.lazy.filter { $0 != prefix }.map { $0.utf8 }
+            let names = type.hostKeyAlgorithmNames + [type.userAuthAlgorithmName]
+            var seen: Set<String> = [prefix]
+            return [prefix.utf8] + names.compactMap { name -> String.UTF8View? in
+                seen.insert(name).inserted ? name.utf8 : nil
+            }
         }
     }
 

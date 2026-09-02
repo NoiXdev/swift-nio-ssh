@@ -45,7 +45,9 @@ internal struct UserAuthSignablePayload {
         newBuffer.writeSSHString(serviceName.utf8)
         newBuffer.writeSSHString("publickey".utf8)
         newBuffer.writeSSHBoolean(true)
-        newBuffer.writeSSHString(publicKey.keyPrefix)
+        // The signed copy of `pkalg`. RFC 8332 §3 makes this the algorithm name, which for an RSA
+        // key is `rsa-sha2-512` while the blob written just below stays typed `ssh-rsa`.
+        newBuffer.writeSSHString(publicKey.userAuthAlgorithmName)
         newBuffer.writeCompositeSSHString { buffer in
             buffer.writeSSHHostKey(publicKey)
         }

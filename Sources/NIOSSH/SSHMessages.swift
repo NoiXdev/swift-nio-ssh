@@ -691,7 +691,12 @@ extension ByteBuffer {
                         return nil
                     }
 
-                    guard algorithmName.readableBytesView.elementsEqual(publicKey.keyPrefix) else {
+                    // The `pkalg` field is the key's user auth algorithm name, which RFC 8332 §3
+                    // separates from the type that the key blob itself carries: an RSA user key
+                    // arrives as `pkalg = rsa-sha2-512` around an `ssh-rsa` blob. For every bundled
+                    // type, and for every custom type that does not declare the split, this is the
+                    // same string as `keyPrefix` and this is the check it was before.
+                    guard algorithmName.readableBytesView.elementsEqual(publicKey.userAuthAlgorithmName) else {
                         throw NIOSSHError.invalidSSHMessage(reason: "algorithm and key mismatch in user auth request")
                     }
 
@@ -764,8 +769,9 @@ extension ByteBuffer {
                 return nil
             }
 
-            // Validate consistency here.
-            guard publicKeyType.readableBytesView.elementsEqual(publicKey.keyPrefix) else {
+            // Validate consistency here. PK_OK echoes the name the request offered, which is the
+            // user auth algorithm name, not necessarily the type of the blob beside it.
+            guard publicKeyType.readableBytesView.elementsEqual(publicKey.userAuthAlgorithmName) else {
                 throw NIOSSHError.invalidSSHMessage(reason: "inconsistent key type")
             }
 
@@ -1304,7 +1310,8 @@ extension ByteBuffer {
         case .publicKey(.known(key: let key, signature: let signature)):
             writtenBytes += self.writeSSHString("publickey".utf8)
             writtenBytes += self.writeSSHBoolean(signature != nil)
-            writtenBytes += self.writeSSHString(key.keyPrefix)
+            // `pkalg`: the algorithm name, which is not always the blob type written just below it.
+            writtenBytes += self.writeSSHString(key.userAuthAlgorithmName)
             writtenBytes += self.writeCompositeSSHString { buffer in
                 buffer.writeSSHHostKey(key)
             }
@@ -1338,7 +1345,8 @@ extension ByteBuffer {
 
     mutating func writeUserAuthPKOKMessage(_ message: SSHMessage.UserAuthPKOKMessage) -> Int {
         var writtenBytes = 0
-        writtenBytes += self.writeSSHString(message.key.keyPrefix)
+        // PK_OK echoes the algorithm name the request offered, not the blob type.
+        writtenBytes += self.writeSSHString(message.key.userAuthAlgorithmName)
         writtenBytes += self.writeCompositeSSHString { buffer in
             buffer.writeSSHHostKey(message.key)
         }

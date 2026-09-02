@@ -62,6 +62,28 @@ public protocol NIOSSHPublicKeyProtocol {
     /// bundled with NIOSSH.
     static var hostKeyAlgorithmNames: [String] { get }
 
+    /// The public key algorithm name this key type offers in public key user authentication.
+    ///
+    /// RFC 8332 §3 separates the three identifiers an SSH_MSG_USERAUTH_REQUEST carries. For an RSA
+    /// user key they are all different: the request's `pkalg` field and the signature blob are typed
+    /// `rsa-sha2-512`, while the key blob inside the request stays typed `ssh-rsa`. This member is
+    /// that first identifier, `publicKeyPrefix` is the blob type, and the signature is typed by its
+    /// own `NIOSSHSignatureProtocol.signaturePrefix`.
+    ///
+    /// It appears in three places, and in all three it is the same string: the `pkalg` field of
+    /// SSH_MSG_USERAUTH_REQUEST, the copy of it inside the signed payload (`UserAuthSignablePayload`),
+    /// and the name echoed in SSH_MSG_USERAUTH_PK_OK. OpenSSH's server requires the signature's
+    /// algorithm name to equal `pkalg`, so a type that declares this MUST sign with a signature whose
+    /// `signaturePrefix` is this name too, not the blob prefix.
+    ///
+    /// This is separate from ``hostKeyAlgorithmNames``: that one names the key exchange, this one
+    /// names user authentication, and a type may need either, both or neither.
+    ///
+    /// Implementing this is optional. The default is `publicKeyPrefix`, which is the correct answer
+    /// for every key type whose algorithm name and blob type coincide -- including all of the types
+    /// bundled with NIOSSH.
+    static var userAuthAlgorithmName: String { get }
+
     /// The raw reprentation of this publc key as a blob.
     var rawRepresentation: Data { get }
 
@@ -79,6 +101,10 @@ public protocol NIOSSHPublicKeyProtocol {
 public extension NIOSSHPublicKeyProtocol {
     static var hostKeyAlgorithmNames: [String] {
         [Self.publicKeyPrefix]
+    }
+
+    static var userAuthAlgorithmName: String {
+        Self.publicKeyPrefix
     }
 }
 
